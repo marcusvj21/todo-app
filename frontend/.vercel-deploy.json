@@ -1,0 +1,10 @@
+{
+  "name": "todo-app-frontend",
+  "github": {
+    "repo": "marcusvj21/todo-app",
+    "enabled": true
+  },
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite"
+}

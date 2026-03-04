@@ -44,8 +44,8 @@ app.get('/', (req: Request, res: Response) => {
 // GET /api/todos - Get all todos (with optional filter)
 app.get('/api/todos', async (req: Request, res: Response) => {
   try {
-    const completed = req.query.completed;
-    const filter = completed !== undefined ? { completed: completed === 'true' } : undefined;
+    const completedParam = req.query.completed as string | undefined;
+    const filter = completedParam !== undefined ? { completed: completedParam === 'true' } : undefined;
     const todos = await TodoModel.getAll(filter);
     res.json(todos);
   } catch (error: any) {
@@ -56,7 +56,8 @@ app.get('/api/todos', async (req: Request, res: Response) => {
 // GET /api/todos/:id - Get a specific todo
 app.get('/api/todos/:id', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const idParam = req.params.id as string;
+    const id = parseInt(idParam);
     if (isNaN(id)) {
       return res.status(400).json({ error: 'Invalid todo ID' });
     }
@@ -91,7 +92,8 @@ app.post('/api/todos', async (req: Request, res: Response) => {
 // PUT /api/todos/:id - Update a todo
 app.put('/api/todos/:id', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const idParam = req.params.id as string;
+    const id = parseInt(idParam);
     if (isNaN(id)) {
       return res.status(400).json({ error: 'Invalid todo ID' });
     }
@@ -112,7 +114,8 @@ app.put('/api/todos/:id', async (req: Request, res: Response) => {
 // PATCH /api/todos/:id/toggle - Toggle todo completion status
 app.patch('/api/todos/:id/toggle', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const idParam = req.params.id as string;
+    const id = parseInt(idParam);
     if (isNaN(id)) {
       return res.status(400).json({ error: 'Invalid todo ID' });
     }
@@ -132,7 +135,8 @@ app.patch('/api/todos/:id/toggle', async (req: Request, res: Response) => {
 // DELETE /api/todos/:id - Delete a todo
 app.delete('/api/todos/:id', async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const idParam = req.params.id as string;
+    const id = parseInt(idParam);
     if (isNaN(id)) {
       return res.status(400).json({ error: 'Invalid todo ID' });
     }
