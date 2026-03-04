@@ -1,173 +1,140 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import cors from 'cors';
-import bodyParser from 'body-parser';
+import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { initDatabase, createUpdateTrigger } from './database/init-postgres';
-import { TodoModel, CreateTodoInput, UpdateTodoInput } from './models/TodoPostgres';
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
 // Middleware
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173'
-}));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors());
+app.use(express.json());
 
-// Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Root endpoint
-app.get('/', (req: Request, res: Response) => {
-  res.json({
-    message: 'Todo API Server',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      todos: '/api/todos'
-    }
-  });
-});
-
-// Todo Routes
-
-// GET /api/todos - Get all todos (with optional filter)
-app.get('/api/todos', async (req: Request, res: Response) => {
+// Initialize database
+async function initDB() {
   try {
-    const completedParam = req.query.completed as string | undefined;
-    const filter = completedParam !== undefined ? { completed: completedParam === 'true' } : undefined;
-    const todos = await TodoModel.getAll(filter);
-    res.json(todos);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS todos (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        completed BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Database initialized');
+  } catch (err) {
+    console.error('Database init error:', err);
+  }
+}
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Get all todos
+app.get('/api/todos', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM todos ORDER BY id DESC');
+    res.json(result.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/todos/:id - Get a specific todo
-app.get('/api/todos/:id', async (req: Request, res: Response) => {
+// Get single todo
+app.get('/api/todos/:id', async (req, res) => {
   try {
-    const idParam = req.params.id as string;
-    const id = parseInt(idParam);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid todo ID' });
-    }
-    
-    const todo = await TodoModel.getById(id);
-    if (!todo) {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM todos WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Todo not found' });
     }
-    
-    res.json(todo);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/todos - Create a new todo
-app.post('/api/todos', async (req: Request, res: Response) => {
+// Create todo
+app.post('/api/todos', async (req, res) => {
   try {
-    const { title, description }: CreateTodoInput = req.body;
-    
-    if (!title || title.trim() === '') {
+    const { title, description } = req.body;
+    if (!title) {
       return res.status(400).json({ error: 'Title is required' });
     }
-    
-    const todo = await TodoModel.create({ title, description });
-    res.status(201).json(todo);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    const result = await pool.query(
+      'INSERT INTO todos (title, description) VALUES ($1, $2) RETURNING *',
+      [title, description || '']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// PUT /api/todos/:id - Update a todo
-app.put('/api/todos/:id', async (req: Request, res: Response) => {
+// Update todo
+app.put('/api/todos/:id', async (req, res) => {
   try {
-    const idParam = req.params.id as string;
-    const id = parseInt(idParam);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid todo ID' });
-    }
-    
-    const updateData: UpdateTodoInput = req.body;
-    const todo = await TodoModel.update(id, updateData);
-    
-    if (!todo) {
+    const { id } = req.params;
+    const { title, description, completed } = req.body;
+    const result = await pool.query(
+      'UPDATE todos SET title = $1, description = $2, completed = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+      [title, description, completed, id]
+    );
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Todo not found' });
     }
-    
-    res.json(todo);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH /api/todos/:id/toggle - Toggle todo completion status
-app.patch('/api/todos/:id/toggle', async (req: Request, res: Response) => {
+// Toggle todo
+app.patch('/api/todos/:id/toggle', async (req, res) => {
   try {
-    const idParam = req.params.id as string;
-    const id = parseInt(idParam);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid todo ID' });
-    }
-    
-    const todo = await TodoModel.toggle(id);
-    
-    if (!todo) {
+    const { id } = req.params;
+    const result = await pool.query(
+      'UPDATE todos SET completed = NOT completed, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *',
+      [id]
+    );
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Todo not found' });
     }
-    
-    res.json(todo);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /api/todos/:id - Delete a todo
-app.delete('/api/todos/:id', async (req: Request, res: Response) => {
+// Delete todo
+app.delete('/api/todos/:id', async (req, res) => {
   try {
-    const idParam = req.params.id as string;
-    const id = parseInt(idParam);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid todo ID' });
-    }
-    
-    const deleted = await TodoModel.delete(id);
-    
-    if (!deleted) {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM todos WHERE id = $1 RETURNING *', [id]);
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Todo not found' });
     }
-    
     res.status(204).send();
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Initialize database and start server
-const startServer = async () => {
-  try {
-    await initDatabase();
-    await createUpdateTrigger();
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log(`📊 Health check available at http://localhost:${PORT}/health`);
-      console.log(`📝 Todo API available at http://localhost:${PORT}/api/todos`);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-startServer();
+// Start server
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
+});
